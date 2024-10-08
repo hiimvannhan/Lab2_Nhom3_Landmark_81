@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+	<title>Lab02 - Nhom 3</title>
+
+	<style>
+		html,
+		body,
+		#viewDiv {
+			padding: 0;
+			margin: 0;
+			height: 100%;
+			width: 100%;
+		}
+
+		#toggleButton {
+			position: absolute;
+			top: 10px;
+			left: 50%;
+			transform: translateX(-50%);
+			z-index: 10;
+			padding: 10px 20px;
+			background-color: white;
+			border: 1px solid black;
+			cursor: pointer;
+		}
+	</style>
+
+	<link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/light/main.css" />
+	<script src="https://js.arcgis.com/4.30/"></script>
+
+	<script>
+		let map, view, geoJSONLayers = [], meshLayer;
+
+		require([
+			"esri/Map",
+			"esri/views/SceneView",
+			"esri/layers/GeoJSONLayer",
+			"esri/layers/GraphicsLayer",
+			"esri/geometry/Mesh",
+			"esri/geometry/Point",
+			"esri/Graphic"
+		], function (Map, SceneView, GeoJSONLayer, GraphicsLayer, Mesh, Point, Graphic) {
+
+			// Function tạo thuộc tính hiển thị cho GeoJSON
+			async function createProperties(properties) {
+				return {
+					"Name": properties["Name"],
+					"Chiều cao (m)": properties["Building Height"] += " m",
+					"Diện tích sàn (m²)": properties["Gross Floor Area"] += " m²",
+					"Độ cao sàn (m)": properties["Ground to Sea Elevation"] += " m",
+					"Mục đích sử dụng": properties["Land Use"],
+				};
+			}
+
+			// Tạo màu dựa trên mục đích sử dụng
+			function getColorForLandUse(landUse) {
+				const landUseColors = {
+					"Tầng kỹ thuật": "#cccccc",
+					"Khu vực khách sạn": "#ff9999",
+					"Khu vực thương mại & giải trí": "#92c5de",
+					"Khu vực dân cư": "#f4a582",
+					"Đài quan sát SkyView": "#00bfff",
+					"Khu vực nhà xe": "#666666",
+					"Tháp Ăng-ten": "#cccccc",
+					"Ăng-ten": "#cccccc",
+					"Khác": "#d9d9d9"
+				};
+
+				return landUseColors[landUse] || landUseColors["Khác"];
+			}
+
+			// Tạo các layer từ GeoJSON
+			async function createGeoJSONLayers() {
+				const folderPath = './geojson/';
+				const totalFiles = 86;
+				const layers = [];
+				for (let i = 1; i <= totalFiles; i++) {
+					const fileName = `${i}.geojson`;
+					const filePath = folderPath + fileName;
+
+					try {
+						const response = await fetch(filePath);
+						const data = await response.json();
+
+						data.features.forEach(async feature => {
+							// Thêm thuộc tính hiển thị
+							feature.properties = await createProperties(feature.properties);
+
+							// Lấy mục đích sử dụng và gán màu cho từng tầng
+							const landUse = feature.properties["Mục đích sử dụng"];
+							const color = getColorForLandUse(landUse);
+
+							// Tạo layer GeoJSON
+							const geojsonLayer = new GeoJSONLayer({
+								url: URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' })),
+								renderer: {
+									type: "simple",
+									symbol: {
+										type: "polygon-3d",
+										symbolLayers: [{
+											type: "extrude",
+											size: feature.properties["Chiều cao (m)"] || 10,
+											material: {
+												color: color // Thay đổi màu dựa trên mục đích sử dụng
+											},
+											edges: {
+												type: "solid",
+												color: [50, 50, 50, 1],
+											},
+										}]
+									}
+								}
+							});
+
+							layers.push(geojsonLayer);
+						});
+					} catch (error) {
+						console.error(`Error loading file: ${filePath}`, error);
+					}
+				}
+				return layers;
+			}
+
+			// Tạo layer Mesh 3D từ file .glb
+			async function createMeshLayers() {
+				const sketchLayer = new GraphicsLayer({
+					elevationInfo: {
+						mode: "absolute-height"
+					},
+					title: "Sketched geometries"
+				});
+
+				const position = new Point({
+					x: 106.72183499999775,
+					y: 10.794851998793431,
+					z: 3.81,
+				});
+
+				Mesh.createFromGLTF(position, "./Landmark_81.glb")
+					.then(function (geometry) {
+						geometry.scale(1, { origin: position });
+						geometry.rotate(0, 0, 0);
+						const graphic = new Graphic({
+							geometry,
+							symbol: {
+								type: "mesh-3d",
+								symbolLayers: [{
+									type: "fill",
+								}]
+							}
+						});
+						sketchLayer.add(graphic);
+					})
+					.catch(console.error);
+				return sketchLayer;
+			}
+
+			// Hàm khởi tạo bản đồ
+			async function initializeMap() {
+				geoJSONLayers = await createGeoJSONLayers();
+				meshLayer = await createMeshLayers();
+
+				map = new Map({
+					basemap: "topo-vector",
+					ground: "world-elevation",
+					layers: geoJSONLayers // Mặc định là GeoJSON
+				});
+
+				view = new SceneView({
+					container: "viewDiv",
+					map: map,
+					camera: {
+						// position: [106.72213885798764, 10.788029393811454, 485.8717800984159],
+						// heading: 357.29651630467794,
+						// tilt: 72.06520779139849,
+						position: [106.72225337235055, 10.787313947344408, 573.4460072694346],
+						heading: 356.96945158083116,
+						tilt: 68.87511345415211,
+						fov: 65
+					}
+				});
+
+				view.popup.defaultPopupTemplateEnabled = true;
+
+				view.watch("camera", function (camera) {
+					console.log("Current Camera Position:");
+					console.log("Position: ", camera.position);
+					console.log("Heading: ", camera.heading);
+					console.log("Tilt: ", camera.tilt);
+				});
+			}
+
+			// Gọi hàm khởi tạo khi tải trang 
+			initializeMap();
+		});
+
+		// Chuyển đổi giữa GeoJSON và Mesh
+		function toggleLayer() {
+			const button = document.getElementById("toggleButton");
+			const isGeoJSON = map.layers.includes(geoJSONLayers[0]);
+			map.removeAll();
+			if (isGeoJSON) {
+				map.add(meshLayer);
+				button.textContent = "Chuyển sang GeoJSON";
+			} else {
+				map.addMany(geoJSONLayers);
+				button.textContent = "Chuyển sang Mesh";
+			}
+		}
+	</script>
+</head>
+
+<body>
+	<!-- Nút chuyển đổi hiển thị -->
+	<button id="toggleButton" onclick="toggleLayer()">Chuyển sang Mesh</button>
+
+	<!-- Bản đồ -->
+	<div id="viewDiv"></div>
+
+</body>
+
+</html>

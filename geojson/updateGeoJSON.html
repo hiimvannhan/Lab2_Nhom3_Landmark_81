@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <title>Lab02 - Nhom 3 - updateGeoJSON</title>
+
+    <script>
+        function getFloorCategory(floorNumber) {
+            const floorGroups = {
+                "technical": {
+                    name: "Tầng kỹ thuật",
+                    floors: [78, 46, 21]
+                },
+                "hotel": {
+                    name: "Khu vực khách sạn",
+                    floors: createFloorRange(47, 71)
+                },
+                "commercial": {
+                    name: "Khu vực thương mại & giải trí",
+                    floors: [...createFloorRange(72, 77), 84, ...createFloorRange(1, 3)]
+                },
+                "residential": {
+                    name: "Khu vực dân cư",
+                    floors: [...createFloorRange(42, 45), ...createFloorRange(22, 41), ...createFloorRange(6, 20), ...createFloorRange(4, 5)]
+                },
+                "observatory": {
+                    name: "Đài quan sát SkyView",
+                    floors: createFloorRange(79, 81)
+                },
+                "basement": {
+                    name: "Khu vực nhà xe",
+                    floors: createFloorRange(85, 86)
+                },
+                "tower": {
+                    name: "Tháp Ăng-ten",
+                    floors: [82]
+                },
+                "antenna": {
+                    name: "Ăng-ten",
+                    floors: [83]
+                }
+            };
+
+            for (const category in floorGroups) {
+                if (floorGroups[category].floors.includes(floorNumber)) {
+                    return floorGroups[category].name;
+                }
+            }
+            return "Không xác định";
+        }
+
+        function createFloorRange(min, max) {
+            let range = [];
+            for (let i = min; i <= max; i++) {
+                range.push(i);
+            }
+            return range;
+        }
+
+        // Đọc tất cả các file GeoJSON
+        async function readGeoJSONFiles() {
+            const n = 1000000;
+            const totalFiles = 86; // Tổng số file geojson
+            const specialFloors = {
+                82: "Tháp Ăng-ten",
+                83: "Ăng-ten",
+                84: "Tầng B1",
+                85: "Tầng B2",
+                86: "Tầng B3"
+            };
+            // const offset = 0.31;
+
+            for (let i = 1; i <= totalFiles; i++) {
+                const filePath = './' + `${i}.geojson`;
+
+                try {
+                    const response = await fetch(filePath);
+                    const data = await response.json();
+
+                    // Xử lý và lấy dữ liệu cần thiết
+                    data.features.forEach(feature => {
+                        const groundElevation = feature.properties["Ground to Sea Elevation"]; // Lấy dữ liệu cao độ
+
+                        // Thêm cao độ vào trong các tọa độ của MultiPolygon
+                        feature.geometry.coordinates = feature.geometry.coordinates.map(polygon =>
+                            polygon.map(ring =>
+                                ring.map(coord =>
+                                    [coord[0], coord[1], groundElevation]) // Thêm cao độ vào tọa độ [x, y, z]
+                            )
+                        );
+                        // Cập nhật giá trị cần thiết
+                        feature.properties["Eave to Sea Elevation"] = groundElevation + feature.properties["Building Height"];
+                        feature.properties["Other Storeys Height"] = 0;
+                        feature.properties["Name"] = specialFloors[i] || "Tầng " + i;
+                        feature.properties["GIS_uuid"] = n + i;
+                        feature.properties["Modelur_uid"] = n + i;
+                        feature.properties["Land Use"] = getFloorCategory(i);
+                        feature.id = n + i;
+                    });
+
+                    // Tải file GeoJSON
+                    const updatedFileName = `${i}.geojson`;
+                    const updatedData = JSON.stringify(data, null, 2);
+
+                    try {
+                        const blob = new Blob([updatedData], { type: 'application/json' });
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = updatedFileName;
+                        // link.click(); // Comment dòng này để không tải file
+                        window.URL.revokeObjectURL(url);
+                    } catch (error) {
+                        console.error(`Error writing to file: ${updatedFileName}`, error);
+                    }
+
+                } catch (error) {
+                    console.error(`Error loading file: ${filePath}`, error);
+                }
+
+                // Thêm độ trễ giữa các lần tải xuống
+                await new Promise(resolve => setTimeout(resolve, 500)); // Độ trễ 1 giây
+            }
+        }
+
+        readGeoJSONFiles();
+    </script>
+</head>
+
+<body>
+
+</body>
+
+</html>
